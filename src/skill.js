@@ -16,14 +16,10 @@ function playbookList(playbooks) {
   return playbooks.map((p) => `- \`${p.id}\` - ${p.use_when}`).join("\n");
 }
 
-function skillCommandText(text) {
-  return text.replaceAll("`lavish-axi", "`npx -y lavish-axi");
-}
-
 /**
  * Render the installable SKILL.md for the lavish skill. The body mirrors what
  * `lavish-axi` prints with no arguments (minus live session state), while the
- * frontmatter adds discovery metadata for Agent Skills and Hermes Agent.
+ * frontmatter stays within the Agent Skills standard for shared harnesses.
  *
  * @returns {string} full SKILL.md contents including YAML frontmatter
  */
@@ -33,21 +29,19 @@ export function createSkillMarkdown() {
   return `---
 name: lavish
 description: ${SKILL_DESCRIPTION}
-argument-hint: <what the artifact should show>
-author: Kun Chen (kunchenguid)
+license: MIT
 metadata:
-  hermes:
-    tags: [html, review, artifacts, visualization]
-    category: productivity
+  argument-hint: "<what the artifact should show>"
+  author: "Kun Chen (kunchenguid)"
+  upstream: "https://github.com/kunchenguid/lavish-axi"
 ---
 
 # Lavish Editor
 
-${skillCommandText(home.description)}
+${home.description}
 
-You do not need lavish-axi installed globally - invoke it with \`npx -y lavish-axi <html-file>\`.
-If lavish-axi output shows a follow-up command starting with \`lavish-axi\`, run it as \`npx -y lavish-axi ...\` instead.
-In restricted subprocess sandboxes, CI, or agent harnesses where \`npx -y\` exits opaquely (for example with status 216), use an already-installed copy directly: \`node "$(npm root)/lavish-axi/dist/cli.mjs" <html-file>\` for a local install, \`node "$(npm root -g)/lavish-axi/dist/cli.mjs" <html-file>\` for a global install, or the bare \`lavish-axi <html-file>\` bin after installing once.
+Use the \`lavish-axi\` command available on PATH. A managed environment may provide this command as a pinned wrapper around a reviewed package version.
+If \`lavish-axi\` is missing, stop and tell the user the local Lavish CLI is not installed; do not fall back to \`npx -y lavish-axi\` unless the user explicitly asks to run an unpinned package.
 
 ## Request
 
@@ -63,15 +57,15 @@ ${home.help[home.help.length - 1]}
 ## Workflow
 
 1. Create the HTML artifact (default location \`.lavish/<name>.html\` in the working directory).
-2. Run \`npx -y lavish-axi <html-file>\` to open or resume a review session in the browser.
-3. Run \`npx -y lavish-axi poll <html-file>\` to long-poll for the user's annotations, queued prompts, and browser-reported \`layout_warnings\`.
+2. Run \`lavish-axi <html-file>\` to open or resume a review session in the browser.
+3. Run \`lavish-axi poll <html-file>\` to long-poll for the user's annotations, queued prompts, and browser-reported \`layout_warnings\`.
    On the first poll, prefer \`--agent-reply "<one-line summary of what you built and what to review first>"\` so the conversation panel opens with context.
    The poll stays silent until the user acts or the real browser reports fresh layout warnings - leave it running, never kill it.
    If the poll gets killed or times out anyway, just re-run it - queued feedback is never lost.
 4. If poll returns \`layout_warnings\`, follow the returned \`next_step\`: fix and re-check fresh error-severity findings, but proceed with a note instead of looping when every current warning is persistent or low-severity.
 5. Apply human feedback, then poll again with \`--agent-reply "<message>"\` to reply in the browser and keep the loop going.
-6. Run \`npx -y lavish-axi end <html-file>\` when the review is finished.
-7. If the user ends the session from the browser instead, \`npx -y lavish-axi <html-file>\` refuses to reopen it and says so - only pass \`--reopen\` when the user asks for further review or something genuinely important needs their visual attention. Otherwise deliver remaining updates directly in this conversation.
+6. Run \`lavish-axi end <html-file>\` when the review is finished.
+7. If the user ends the session from the browser instead, \`lavish-axi <html-file>\` refuses to reopen it and says so - only pass \`--reopen\` when the user asks for further review or something genuinely important needs their visual attention. Otherwise deliver remaining updates directly in this conversation.
 
 ## Visual guidance
 
@@ -79,14 +73,14 @@ ${bullets(home.visual_guidance)}
 
 ## Playbooks
 
-Run \`npx -y lavish-axi playbook <id>\` for focused, detailed guidance on any of these.
+Run \`lavish-axi playbook <id>\` for focused, detailed guidance on any of these.
 ${PLAYBOOK_ROUTER_HELP}
-For flows, architecture, state, or sequence diagrams, do not hand-build boxes-and-arrows from div/flexbox; open the diagram playbook and use the theme-aware Mermaid snippet from \`npx -y lavish-axi design\` unless SVG is needed for richly annotated nodes.
+For flows, architecture, state, or sequence diagrams, do not hand-build boxes-and-arrows from div/flexbox; open the diagram playbook and use the theme-aware Mermaid snippet from \`lavish-axi design\` unless SVG is needed for richly annotated nodes.
 
 ${playbookList(home.playbooks)}
 
 ## Commands & rules
 
-${bullets(home.help.map(skillCommandText))}
+${bullets(home.help)}
 `;
 }

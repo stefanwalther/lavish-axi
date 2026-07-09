@@ -4,10 +4,6 @@ import test from "node:test";
 import { createHomeOutput } from "../src/cli.js";
 import { SKILL_DESCRIPTION, createSkillMarkdown } from "../src/skill.js";
 
-function skillCommandText(text) {
-  return text.replaceAll("`lavish-axi", "`npx -y lavish-axi");
-}
-
 test("createSkillMarkdown emits valid frontmatter naming the lavish skill", () => {
   const md = createSkillMarkdown();
   assert.ok(md.startsWith("---\n"), "starts with frontmatter fence");
@@ -16,16 +12,19 @@ test("createSkillMarkdown emits valid frontmatter naming the lavish skill", () =
   const frontmatter = md.slice(4, end);
   assert.match(frontmatter, /^name: lavish$/m);
   assert.match(frontmatter, /^description: /m);
-  assert.match(frontmatter, /^argument-hint: /m);
+  assert.match(frontmatter, /^license: MIT$/m);
   assert.ok(frontmatter.includes(SKILL_DESCRIPTION), "frontmatter carries the skill description");
 });
 
-test("createSkillMarkdown emits Hermes Agent metadata in frontmatter", () => {
+test("createSkillMarkdown keeps optional metadata inside Agent Skills fields", () => {
   const md = createSkillMarkdown();
   const frontmatter = md.slice(4, md.indexOf("\n---\n", 4));
 
-  assert.match(frontmatter, /^author: Kun Chen \(kunchenguid\)$/m);
-  assert.match(frontmatter, /^metadata:\n {2}hermes:\n {4}tags: \[[^\]]+\]\n {4}category: \S+$/m);
+  assert.doesNotMatch(frontmatter, /^argument-hint:/m, "argument hint is not a top-level field");
+  assert.doesNotMatch(frontmatter, /^author:/m, "author is not a top-level field");
+  assert.match(frontmatter, /^metadata:\n {2}argument-hint: /m);
+  assert.match(frontmatter, /^ {2}author: "Kun Chen \(kunchenguid\)"$/m);
+  assert.match(frontmatter, /^ {2}upstream: "https:\/\/github\.com\/kunchenguid\/lavish-axi"$/m);
   assert.doesNotMatch(frontmatter, /^version:/m, "version is omitted to avoid release churn");
 });
 
@@ -41,7 +40,7 @@ test("createSkillMarkdown mirrors the no-args home output", () => {
   const md = createSkillMarkdown();
   const home = createHomeOutput({ bin: "lavish-axi", sessions: [], includeSessions: false, agent: "static" });
 
-  assert.ok(md.includes(skillCommandText(home.description)), "includes the product description");
+  assert.ok(md.includes(home.description), "includes the product description");
 
   for (const item of home.visual_guidance) {
     assert.ok(md.includes(item), `includes visual guidance: ${item.slice(0, 32)}...`);
@@ -53,8 +52,7 @@ test("createSkillMarkdown mirrors the no-args home output", () => {
   }
 
   for (const item of home.help) {
-    const skillItem = skillCommandText(item);
-    assert.ok(md.includes(skillItem), `includes help: ${skillItem.slice(0, 32)}...`);
+    assert.ok(md.includes(item), `includes help: ${item.slice(0, 32)}...`);
   }
 });
 
@@ -87,14 +85,14 @@ test("createSkillMarkdown omits setup hooks guidance", () => {
   assert.doesNotMatch(md, /setup hooks/);
 });
 
-test("createSkillMarkdown uses non-interactive npx commands", () => {
+test("createSkillMarkdown uses lavish-axi on PATH without an unpinned fallback", () => {
   const md = createSkillMarkdown();
 
-  assert.match(md, /`npx -y lavish-axi <html-file>`/);
-  assert.match(md, /If lavish-axi output shows a follow-up command starting with `lavish-axi`/);
-  assert.match(md, /run it as `npx -y lavish-axi/);
-  assert.doesNotMatch(md, /`npx lavish-axi/);
-  assert.doesNotMatch(md, /Run `lavish-axi/);
+  assert.match(md, /`lavish-axi <html-file>`/);
+  assert.match(md, /pinned wrapper around a reviewed package version/);
+  assert.match(md, /do not fall back to `npx -y lavish-axi` unless the user explicitly asks/);
+  assert.doesNotMatch(md, /Stefan's dotfiles/);
+  assert.doesNotMatch(md, /Run `npx -y lavish-axi/);
 });
 
 test("createSkillMarkdown documents installed-copy fallback for restricted sandboxes", () => {
