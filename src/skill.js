@@ -16,10 +16,6 @@ function playbookList(playbooks) {
   return playbooks.map((p) => `- \`${p.id}\` - ${p.use_when}`).join("\n");
 }
 
-function skillCommandText(text) {
-  return text;
-}
-
 /**
  * Render the installable SKILL.md for the lavish skill. The body mirrors what
  * `lavish-axi` prints with no arguments (minus live session state), while the
@@ -42,10 +38,10 @@ metadata:
 
 # Lavish Editor
 
-${skillCommandText(home.description)}
+${home.description}
 
-Use the \`lavish-axi\` command available on PATH. In Stefan's dotfiles this command is a pinned wrapper around the reviewed fork.
-If \`lavish-axi\` is missing, stop and tell the user the local Lavish wrapper is not installed; do not fall back to \`npx -y lavish-axi\` unless the user explicitly asks to run an unpinned upstream package.
+Use the \`lavish-axi\` command available on PATH. A managed environment may provide this command as a pinned wrapper around a reviewed package version.
+If \`lavish-axi\` is missing, stop and tell the user the local Lavish CLI is not installed; do not fall back to \`npx -y lavish-axi\` unless the user explicitly asks to run an unpinned package.
 
 ## Request
 
@@ -84,6 +80,6 @@ ${playbookList(home.playbooks)}
 
 ## Commands & rules
 
-${bullets(home.help.map(skillCommandText))}
+${bullets(home.help)}
 `;
 }

@@ -12,8 +12,8 @@ metadata:
 
 Lavish Editor helps agents turn rich HTML artifacts into collaborative human review surfaces. Whenever you are about to give user a complex response that will be easier to understand via a rich / interactive page, consider using Lavish Editor. First generate an interactive HTML artifact according to user request, then run `lavish-axi <html-file>` so the user can visually review it, annotate elements or selected text, queue prompts, and send feedback back through `lavish-axi poll`.
 
-Use the `lavish-axi` command available on PATH. In Stefan's dotfiles this command is a pinned wrapper around the reviewed fork.
-If `lavish-axi` is missing, stop and tell the user the local Lavish wrapper is not installed; do not fall back to `npx -y lavish-axi` unless the user explicitly asks to run an unpinned upstream package.
+Use the `lavish-axi` command available on PATH. A managed environment may provide this command as a pinned wrapper around a reviewed package version.
+If `lavish-axi` is missing, stop and tell the user the local Lavish CLI is not installed; do not fall back to `npx -y lavish-axi` unless the user explicitly asks to run an unpinned package.
 
 ## Request
 

@@ -4,10 +4,6 @@ import test from "node:test";
 import { createHomeOutput } from "../src/cli.js";
 import { SKILL_DESCRIPTION, createSkillMarkdown } from "../src/skill.js";
 
-function skillCommandText(text) {
-  return text;
-}
-
 test("createSkillMarkdown emits valid frontmatter naming the lavish skill", () => {
   const md = createSkillMarkdown();
   assert.ok(md.startsWith("---\n"), "starts with frontmatter fence");
@@ -44,7 +40,7 @@ test("createSkillMarkdown mirrors the no-args home output", () => {
   const md = createSkillMarkdown();
   const home = createHomeOutput({ bin: "lavish-axi", sessions: [], includeSessions: false });
 
-  assert.ok(md.includes(skillCommandText(home.description)), "includes the product description");
+  assert.ok(md.includes(home.description), "includes the product description");
 
   for (const item of home.visual_guidance) {
     assert.ok(md.includes(item), `includes visual guidance: ${item.slice(0, 32)}...`);
@@ -56,8 +52,7 @@ test("createSkillMarkdown mirrors the no-args home output", () => {
   }
 
   for (const item of home.help) {
-    const skillItem = skillCommandText(item);
-    assert.ok(md.includes(skillItem), `includes help: ${skillItem.slice(0, 32)}...`);
+    assert.ok(md.includes(item), `includes help: ${item.slice(0, 32)}...`);
   }
 });
 
@@ -81,11 +76,12 @@ test("createSkillMarkdown omits setup hooks guidance", () => {
   assert.doesNotMatch(md, /setup hooks/);
 });
 
-test("createSkillMarkdown uses the pinned lavish-axi wrapper on PATH", () => {
+test("createSkillMarkdown uses lavish-axi on PATH without an unpinned fallback", () => {
   const md = createSkillMarkdown();
 
   assert.match(md, /`lavish-axi <html-file>`/);
-  assert.match(md, /pinned wrapper around the reviewed fork/);
+  assert.match(md, /pinned wrapper around a reviewed package version/);
   assert.match(md, /do not fall back to `npx -y lavish-axi` unless the user explicitly asks/);
+  assert.doesNotMatch(md, /Stefan's dotfiles/);
   assert.doesNotMatch(md, /Run `npx -y lavish-axi/);
 });
