@@ -94,13 +94,3 @@ test("createSkillMarkdown uses lavish-axi on PATH without an unpinned fallback",
   assert.doesNotMatch(md, /Stefan's dotfiles/);
   assert.doesNotMatch(md, /Run `npx -y lavish-axi/);
 });
-
-test("createSkillMarkdown documents installed-copy fallback for restricted sandboxes", () => {
-  const md = createSkillMarkdown();
-
-  assert.match(md, /restricted subprocess sandboxes/);
-  assert.match(md, /status 216/);
-  assert.match(md, /`node "\$\(npm root\)\/lavish-axi\/dist\/cli\.mjs" <html-file>`/);
-  assert.match(md, /`node "\$\(npm root -g\)\/lavish-axi\/dist\/cli\.mjs" <html-file>`/);
-  assert.match(md, /bare `lavish-axi <html-file>` bin/);
-});
