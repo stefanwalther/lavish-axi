@@ -1,8 +1,8 @@
 # Fork delta
 
 This fork was reviewed against `upstream/main` at `3b2c10f` on 2026-08-21.
-The upstream merge retains two intentional policy differences. Other historical
-fork commits no longer change the effective tree.
+The upstream merge retains three intentional differences. Other historical fork
+commits no longer change the effective tree.
 
 ## Retained policies
 
@@ -34,6 +34,19 @@ Keep this policy unless the publication boundary changes. Its owner is the
 runtime guidance in `src/cli.js`; `test/cli-output.test.js` verifies both home
 and command-help output. The generated skill inherits the same guidance.
 
+### Keep release metadata on the fork's release line
+
+The sync imports upstream implementation commits but is not itself a release.
+Keep `CHANGELOG.md`, `.release-please-manifest.json`, `package.json`, and
+`plugin.json` at the versions from this fork's `main` branch. The fork's
+Release Please workflow owns all four files and will advance them together when
+the synced code is released here.
+
+This also keeps upstream release commits from making an ordinary sync pull
+request modify the two generated files rejected by the repository's generated
+file guard. Re-evaluate this policy only if the fork stops publishing its own
+release line or adopts an upstream-version mirroring workflow.
+
 ## Superseded commits
 
 The following commits reduced false positives in the former automatic layout
@@ -62,4 +75,5 @@ Before each upstream merge:
 2. Recheck whether upstream now satisfies either retained policy.
 3. Merge the source owners first and regenerate `skills/lavish/SKILL.md` with
    `pnpm run build:skill`.
-4. Run `pnpm run check` before committing or pushing the sync.
+4. Restore the fork's four release-owned files from its target branch.
+5. Run `pnpm run check` before committing or pushing the sync.
