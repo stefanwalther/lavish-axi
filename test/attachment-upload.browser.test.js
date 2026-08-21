@@ -36,6 +36,20 @@ function run(command, args, env, timeout = 45_000) {
   return `${result.stdout || ""}${result.stderr || ""}`;
 }
 
+function decodeEvaluationResult(output) {
+  const raw = output.match(/result:\s*("(?:[^"\\]|\\.)*")/s)?.[1];
+  assert.ok(raw, output);
+  let value = JSON.parse(raw);
+  while (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      break;
+    }
+  }
+  return value;
+}
+
 async function freePort() {
   const server = net.createServer();
   await new Promise((resolve, reject) => {
@@ -276,10 +290,10 @@ test(
         document.body.appendChild(probe);
         const expected = getComputedStyle(probe).color;
         probe.remove();
-        return JSON.stringify({ actual: getComputedStyle(status).color, expected, text: status.textContent });
+        return { actual: getComputedStyle(status).color, expected, text: status.textContent };
       })()`);
       assert.doesNotMatch(errorColors, /missing-error-chip/, errorColors);
-      const colors = JSON.parse(errorColors.match(/\{.*\}/)?.[0] || "{}");
+      const colors = decodeEvaluationResult(errorColors);
       assert.match(colors.text, /Unsupported file type/, errorColors);
       assert.equal(colors.actual, colors.expected, `error status must render in --danger:\n${errorColors}`);
     } finally {
