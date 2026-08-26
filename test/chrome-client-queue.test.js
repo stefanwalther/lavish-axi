@@ -2182,6 +2182,33 @@ test("an incomplete 200 reports a landed publish and shows the fields the host d
   assert.equal(chrome.element("shareUpdateKeyNote").hidden, true);
 });
 
+test("an incomplete publish explains an unusable update key without garbling the warning", async () => {
+  const chrome = await createChromeHarness({
+    fetchImpl: async () => ({
+      ok: false,
+      json: async () => ({
+        error: "ht-ml.app published the page but its response did not include a site_id",
+        outcome: "published-incomplete",
+        public: true,
+        url: "https://abc123.ht-ml.app/",
+        update_key: "uk_secret",
+      }),
+    }),
+  });
+  const submit = chrome.element("shareForm").listeners.get("submit");
+
+  await submit({ preventDefault() {} });
+  await flushPromises();
+
+  const status = chrome.element("shareStatus").textContent;
+  assert.match(status, /issued once, though the host did not return a site id/i);
+  assert.doesNotMatch(status, /thoughThe/);
+  assert.match(status, /can NEVER be republished or unpublished/);
+  assert.equal(chrome.element("shareUpdateKey").value, "uk_secret");
+  assert.equal(chrome.element("shareUpdateKeyResult").hidden, false);
+  assert.equal(chrome.element("shareSiteIdResult").hidden, true);
+});
+
 test("a throw after a successful render leaves the url and update key on screen", async () => {
   // The panel is already cleared before the fetch, so a clear in the catch could only ever reach a
   // result the success path had already rendered. The update_key is issued once and ht-ml.app has

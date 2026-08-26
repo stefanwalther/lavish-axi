@@ -2012,7 +2012,7 @@ function reportIncompletePublish(data) {
     ? "No update key came back, and ht-ml.app issues one only once and has no delete, so this page can never be republished or unpublished. "
     : rendered.siteId
       ? "Copy the update key below - it is issued once. "
-      : "Copy the update key below - it is issued once, though" + NO_SITE_ID_WARNING.slice(1) + " ";
+      : "Copy the update key below - it is issued once, though the" + NO_SITE_ID_WARNING.slice(" The".length) + " ";
   shareStatus.textContent =
     "ht-ml.app accepted this publish, so the page IS live and " +
     visibility +
