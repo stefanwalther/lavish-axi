@@ -105,7 +105,11 @@ stopped. Reload after you start it again.” The same test retries a read-only D
 observation when the browser CLI reports that the expected migration navigation
 destroyed its execution context. The event must still appear within the original
 deadline. Keep these assertions aligned with the public behavior until upstream
-makes the same corrections.
+makes the same corrections. The test reconstructs its pre-WebSocket "old build"
+with `git archive` from this fork's pre-sync commit
+`54b55875b1d5cda18a9fe11889ab604e97f73798`, which still shipped the SSE
+transport, so the seven-tab regression stays self-contained in fork-only clones
+where upstream's intermediate commits are absent.
 
 ## Superseded commits
 

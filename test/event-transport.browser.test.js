@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const runBrowserE2e = process.env.LAVISH_AXI_BROWSER_E2E === "1";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const baseCommit = "5b871af347444feda1d3002952ec5fc179248629";
+const baseCommit = "54b55875b1d5cda18a9fe11889ab604e97f73798";
 
 function run(command, args, env, timeout = 20_000, cwd = repoRoot) {
   const result = spawnSync(command, args, {
