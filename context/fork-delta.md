@@ -95,17 +95,22 @@ checks whether a listener closed. Without the bound, an unreachable address
 can leave the suite waiting on the operating system's TCP timeout. This changes
 test reliability only and does not alter server behavior.
 
-### Verify the deliberate-stop banner's current copy
+### Verify the deliberate-stop banner is truthful
 
-`test/event-transport.browser.test.js` checks the reason-specific message the
-browser renders when a deliberate stop leaves an older review tab open.
-Upstream's test still expects the generic no-reason copy even though it starts
-the shutdown with `reason: "stop"`; the runtime correctly renders “Lavish was
-stopped. Reload after you start it again.” The same test retries a read-only DOM
-observation when the browser CLI reports that the expected migration navigation
-destroyed its execution context. The event must still appear within the original
-deadline. Keep these assertions aligned with the public behavior until upstream
-makes the same corrections. The test reconstructs its pre-WebSocket "old build"
+`test/event-transport.browser.test.js` checks the message an older review tab
+renders when a deliberate stop leaves it open. Two truthful copies can legitimately
+win: the deliberate-stop copy “Lavish was stopped. Reload after you start it again.”
+that the old server sends with `reason: "stop"`, and the generic “The Lavish server
+this page was connected to is no longer running. Reloading will work once it is
+running again.” copy that the tab's legacy EventSource reconnect to the replacement
+server delivers with a neutral `server-restarted` reason. Which one the test reads
+depends on whether the read lands before or after that reconnect fires, so the
+assertion accepts either and only forbids the false “updated” copy. This documents
+the stable end state - the banner must never claim Lavish was updated - rather than
+one transient event order. The same test retries a read-only DOM observation when
+the browser CLI reports that the expected migration navigation destroyed its
+execution context. The event must still appear within the original deadline. The
+test reconstructs its pre-WebSocket "old build"
 with `git archive` from this fork's pre-sync commit
 `54b55875b1d5cda18a9fe11889ab604e97f73798`, which still shipped the SSE
 transport, so the seven-tab regression stays self-contained in fork-only clones

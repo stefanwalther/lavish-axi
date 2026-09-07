@@ -239,8 +239,14 @@ test(
             chromeEnv,
             12_000,
           );
-          assert.match(protectedDraft, /Lavish was stopped/);
-          assert.match(protectedDraft, /Reload after you start it again/);
+          // The legacy EventSource reconnect to the replacement server can overwrite the
+          // deliberate-stop copy with the generic no-longer-running copy before this read lands,
+          // so accept either truthful banner - whichever wins that race.
+          assert.match(
+            protectedDraft,
+            /Lavish was stopped\. Reload after you start it again\.|The Lavish server this page was connected to is no longer running\. Reloading will work once it is running again\./,
+            "the outdated banner must show a truthful stopped-or-disconnected copy",
+          );
           assert.doesNotMatch(protectedDraft, /updated/);
           run("chrome-devtools-axi", ["eval", '() => document.getElementById("outdatedReload").click()'], chromeEnv);
         }
