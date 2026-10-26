@@ -1,15 +1,21 @@
 # Fork delta
 
-This fork was reviewed against `upstream/main` at `4413dcc` on 2026-09-17.
+This fork was reviewed against `upstream/main` at `0e2d3de` on 2026-10-26.
 The upstream sync retains four intentional policies and four compatibility
 fixes. Other historical fork commits no longer change the effective tree.
 
-The reviewed delta from `ca4c59d` through `4413dcc` (v0.1.68–v0.1.71) includes
-the snapshot-stall feedback fix, structured conversation history, durable
-prompt-identity settlement, bounded 5 MiB transcripts, and the
-`--agent-reply-file` CLI input. Upstream release commits through v0.1.71 were
-reviewed but their version changes were not imported because this fork keeps
-its own release line.
+The reviewed delta from `4413dcc` through `0e2d3de` (v0.1.72–v0.1.93) includes
+the HTML-tree session and asset confinement security fix, server discovery and
+bind-durability rework with `--also-listen` inheritance, exclusive poll
+ownership with `--owner` and `--takeover` plus the `reply` command with server
+receipt, per-note delivery receipts, queued-annotation editing, whiteboard
+libraries, the explanation playbook, and guidance relocation to
+`docs/invariants.md` and `docs/delivery-acks.md`. Upstream release commits
+through v0.1.93 were reviewed but their version changes were not imported
+because this fork keeps its own release line.
+
+Rollback point for this sync is the pre-sync fork head `3a5ca60`.
+Prior reviewed upstream commit was `4413dcc` (v0.1.71).
 
 ## Retained policies
 
@@ -22,13 +28,14 @@ instead of downloading whichever package version resolves at invocation time.
 
 Keep this policy while the fork is distributed through a reviewed wrapper or
 pinned installation. Its owner is `src/skill.js`; `skills/lavish/SKILL.md` is
-generated from it. `README.md`, `AGENTS.md`, and `test/skill.test.js` describe
-and verify the policy.
+generated from it via `pnpm run build:skill`. `README.md` and
+`test/skill.test.js` describe and verify the policy. Upstream `AGENTS.md` was
+restructured to point at owners instead of restating contracts, so no fork
+sentence remains there; the CLI and README carry the policy.
 
-The original commit also removed nested Hermes metadata because that shape did
-not satisfy the Agent Skills frontmatter contract. Upstream now uses flat,
-string-valued Hermes fields that pass the validator. The sync restores those
-fields while retaining the fork's `upstream` provenance field.
+Upstream added a `reply --help` line in the same `npx` shape. This sync
+converts all four invocation lines to PATH form. The `upstream` provenance
+field is retained alongside upstream's flat, string-valued Hermes fields.
 
 ### Require explicit authorization before hosted sharing
 
@@ -38,9 +45,11 @@ This remains necessary because `share` sends content to a third-party service
 and creates a public page by default unless the user supplies a password.
 
 Keep this policy unless the publication boundary changes. Its owner is the
-runtime guidance in `src/cli.js`; `test/cli-output.test.js` verifies both home
-and command-help output. The generated skill points at that live CLI guidance
-instead of copying it.
+runtime guidance in `src/cli.js` (home output and `share` command help);
+`test/cli-output.test.js` verifies both. `README.md` carries the matching
+user-facing gate. The generated skill points at that live CLI guidance
+instead of copying it. Upstream's `docs/invariants.md` hosted-sharing section
+needed no fork edit.
 
 ### Require an explicit opt-in for Tailscale access
 
@@ -52,9 +61,14 @@ and teardown implementation but enables it only when
 
 The default stays loopback-only because the review server is unauthenticated
 and can read and serve local artifact files. Its owner is the activation gate
-in `src/server.js`; `test/server.test.js` verifies both the disabled default and
-the opted-in server behavior. `src/cli.js`, `README.md`, and `AGENTS.md` own the
-matching runtime, user, and architecture guidance.
+in `src/server.js` (`autoTailscale` requires `LAVISH_AXI_TAILSCALE=1`);
+`test/server.test.js` verifies both the disabled default and the opted-in
+behavior. `src/cli.js` server help, `README.md` Network binding, `src/paths.js`
+comment, and `docs/invariants.md` process-model sentence carry the matching
+runtime, user, and architecture guidance. Upstream `AGENTS.md` no longer states
+the default directly; it points at those owners. `test/server-discovery.test.js`
+needs the opt-in env in the two Tailscale tests because upstream assumes
+automatic detection.
 
 ### Keep release metadata on the fork's release line
 
