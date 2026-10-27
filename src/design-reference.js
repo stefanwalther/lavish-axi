@@ -138,6 +138,14 @@ export const LAYOUT_SAFETY_CSS_SNIPPET = `<style>
   }
 </style>`;
 
+// The agent already knows what it changed answering the last round of feedback,
+// so it says so rather than making Lavish diff two renders. Both attributes are
+// ordinary artifact content: they survive export and opening the file directly.
+export const REVISION_REGISTRY_SNIPPET = `<script type="application/json" data-lavish-revisions>
+[{ "id": "r1", "label": "Round 1", "timestamp": "2026-01-01T10:00:00Z", "summary": "Tightened the pricing copy" }]
+</script>
+<section data-lavish-revision="r1">...the block you changed...</section>`;
+
 // Single source for how agents choose an artifact's design direction. It flows into the
 // no-args home output, top-level --help (via DESIGN_SYSTEM_HINT), the `lavish-axi design`
 // summary, and the design command help. The installable skill does not embed this rule;
@@ -198,7 +206,7 @@ export function createDesignOutput() {
       summary:
         "Use this Lavish CDN fallback only if (1) the user gave no design direction and (2) you already inspected the project the artifact is about and found no design system or style conventions to match. If you have not checked the subject project yet, check first. Lavish does not auto-inject any design system; artifacts stay portable HTML. Paint an explicit page background and readable text. " +
         DESIGN_PRIORITY_RULE +
-        " Paste the CDN snippet below into your `<head>`.",
+        " Lavish adds only its SDK script to your file and never wraps a fragment, so start it with `<!doctype html>`: without one the page renders in quirks mode, where `<table>` text stops inheriting the color a wrapper theme sets. Paste the CDN snippet below into your `<head>`.",
       cdn_snippet: DESIGN_CDN_SNIPPET,
       cdn_urls: DESIGN_CDN_URLS,
       versions: { tailwind: TAILWIND_BROWSER_VERSION, daisyui: DAISYUI_VERSION },
@@ -217,7 +225,24 @@ export function createDesignOutput() {
       mermaid_cdn_snippet: MERMAID_CDN_SNIPPET,
       cdn_urls: { mermaid: MERMAID_CDN_URL },
       versions: { mermaid: MERMAID_VERSION },
+      library_icons: {
+        use_when:
+          "Optional, in a whiteboard flowchart such as an architecture or system diagram: show a node as an icon from an Excalidraw library the user installed. Run `lavish-axi libraries` to see what is installed and `lavish-axi libraries --search <text>` for exact item refs; skip this when nothing is installed.",
+        syntax: "%% lavish-icon <node-id> <library-id>/<item name>",
+        example:
+          "flowchart LR\n  %% lavish-icon api aws-architecture-icons/AWS Lambda\n  user([Customer]) --> api[Orders API]",
+        notes:
+          "One comment line per icon node, in flowcharts only. Keep the node's label naming the component: the icon sits above it. Mermaid ignores `%%` lines, so exported, shared, and directly opened copies show the plain node, and so does the whiteboard when the library or item is missing. A library item the reviewer drops on the whiteboard arrives in the edit summary as `Added library item <ref>`; add it to the Mermaid source as a node with its own `%% lavish-icon` line.",
+      },
     },
+    revision_marking: {
+      use_when:
+        "Opt-in only: on a regeneration that answers the reviewer's feedback, declare what you changed so the browser can show a Revisions legend. Skip it on a first draft, and skip it when you rewrote the whole artifact - a legend that marks everything says nothing.",
+      registry_snippet: REVISION_REGISTRY_SNIPPET,
+      how: 'Append one entry per round to the `data-lavish-revisions` JSON (oldest first, stable `id`s), and put `data-lavish-revision="<id>"` on each block you actually edited or added. Lavish reads them and never restyles the page, so the saved file looks the same opened directly.',
+    },
+    tab_meta:
+      "Opt-in: a long-lived artifact can show live state on the background browser tab with `window.lavish?.setDocumentMeta?.({ title, icon })`; see the README.",
     theme_usage: [
       'Default to `<html data-theme="luxury">` - it matches the Lavish look. Pick a different theme from the list below only when the user asked for one or the content clearly calls for it.',
       'Set a nested section theme with `<section data-theme="night">`.',
