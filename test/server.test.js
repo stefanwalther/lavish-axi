@@ -1068,6 +1068,17 @@ test("chrome shows agent working state when a previous poll has released", async
   assert.match(js, /spinner/);
 });
 
+test("takeover banner explains draft ownership before offering takeover", () => {
+  const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
+  const banner = html.match(/id="handoffBanner"[^>]*>([\s\S]*?)<\/div>/)?.[1] || "";
+  assert.match(
+    banner,
+    /<span>This review is open in another Lavish tab\. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along\.<\/span>/,
+  );
+  assert.doesNotMatch(banner, /switch back there/i);
+  assert.match(banner, /id="handoffTakeover"[^>]*>Take over here/);
+});
+
 test("composer offers two always-visible top-level send actions", async () => {
   const html = createChromeHtml({ key: "abc", file: "/tmp/artifact.html" });
   const css = await chromeCssSource();
@@ -1076,7 +1087,7 @@ test("composer offers two always-visible top-level send actions", async () => {
   assert.match(html, /class="button button-danger" id="sendAndEnd"[^<]*>.*Send &amp; End</);
   assert.match(
     html,
-    /<div class="send-hint" id="sendHint" hidden>Write a message or annotate an element first\.<\/div><div class="actions" id="sendActions"><button class="button button-danger" id="sendAndEnd" type="button">.*<button class="button" id="send">Send to Agent<\/button><\/div>/,
+    /<div class="send-hint" id="sendHint" hidden>Nothing queued in this tab\. Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along\.<\/div><div class="actions" id="sendActions"><button class="button button-danger" id="sendAndEnd" type="button">.*<button class="button" id="send">Send to Agent<\/button><\/div>/,
   );
   assert.doesNotMatch(html, /id="sendCaret"/);
   assert.doesNotMatch(html, /id="sendMenu"/);
@@ -1642,6 +1653,121 @@ test("session URLs use the configured linkHost while binding to loopback", async
     const body = await res.json();
 
     assert.match(body.url, new RegExp(`^http://host\\.example:${server.port}/session/`));
+  } finally {
+    await server.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("LAVISH_AXI_PUBLIC_URL overrides link-host and MagicDNS at both link-building sites", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-public-url-"));
+  const artifact = path.join(dir, "artifact.html");
+  await writeFile(artifact, "<!doctype html><html><body>review</body></html>");
+  try {
+    for (const tailscale of [null, { ipv4: "127.0.0.1", magicDnsName: "review.example.ts.net" }]) {
+      const server = await serve({
+        port: 0,
+        stateFile: path.join(dir, "state.json"),
+        env: {
+          LAVISH_AXI_PUBLIC_URL: "https://lavish.example.test:8443",
+          LAVISH_AXI_LINK_HOST: "link.example.test",
+          ...(tailscale ? { LAVISH_AXI_TAILSCALE: "1" } : {}),
+        },
+        detectTailscale: async () => tailscale,
+        idleTimeoutMs: null,
+      });
+      try {
+        assert.deepEqual(
+          server.addresses.map(({ address }) => address),
+          ["127.0.0.1"],
+        );
+        const opened = await rawRequest(server.port, "/api/sessions", {
+          method: "POST",
+          body: JSON.stringify({ file: artifact, noGate: true }),
+        });
+        assert.equal(opened.status, 200);
+        const { key, url } = JSON.parse(opened.body);
+        assert.equal(url, `https://lavish.example.test:8443/session/${key}?no-gate=1`);
+        const stored = await new SessionStore(path.join(dir, "state.json")).findByKey(key);
+        assert.equal(stored.url, `https://lavish.example.test:8443/session/${key}`);
+        const missing = await rawRequest(server.port, "/session/missing", { headers: { accept: "text/html" } });
+        assert.equal(missing.status, 404);
+        assert.ok(missing.body.includes('href="https://lavish.example.test:8443/"'));
+        const denied = await rawRequest(server.port, `/session/${key}`, {
+          host: "evil.example.test",
+          headers: { accept: "text/html" },
+        });
+        assert.equal(denied.status, 403);
+        assert.ok(denied.body.includes(`href="https://lavish.example.test:8443/session/${key}"`));
+      } finally {
+        await server.close();
+      }
+    }
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("an invalid LAVISH_AXI_PUBLIC_URL fails before binding", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-public-url-"));
+  try {
+    await assert.rejects(async () => {
+      const server = await serve({
+        port: 0,
+        stateFile: path.join(dir, "state.json"),
+        env: { LAVISH_AXI_HOST: "127.0.0.1", LAVISH_AXI_PUBLIC_URL: "https://lavish.example.test/sub" },
+      });
+      await server.close();
+    }, /LAVISH_AXI_PUBLIC_URL must be an http\(s\) origin/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("LAVISH_AXI_PUBLIC_URL auto-allows its host without weakening the same-origin guard", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "lavish-public-url-"));
+  const artifact = path.join(dir, "artifact.html");
+  await writeFile(artifact, "<!doctype html><html><body>review</body></html>");
+  const server = await serve({
+    port: 0,
+    stateFile: path.join(dir, "state.json"),
+    env: { LAVISH_AXI_HOST: "127.0.0.1", LAVISH_AXI_PUBLIC_URL: "https://lavish.example.test:8443" },
+    idleTimeoutMs: null,
+  });
+  try {
+    const opened = await rawRequest(server.port, "/api/sessions", {
+      method: "POST",
+      body: JSON.stringify({ file: artifact }),
+    });
+    const { key } = JSON.parse(opened.body);
+    assert.equal((await rawRequest(server.port, `/session/${key}`, { host: "lavish.example.test:8443" })).status, 200);
+    assert.equal((await rawRequest(server.port, "/health", { host: "evil.example.test" })).status, 403);
+    const headers = { origin: "https://lavish.example.test:8443" };
+    const body = JSON.stringify({ prompts: [{ prompt: "proxy feedback", tag: "message" }] });
+    assert.equal(
+      (
+        await rawRequest(server.port, `/api/${key}/prompts`, {
+          method: "POST",
+          host: "lavish.example.test:8443",
+          headers,
+          body,
+        })
+      ).status,
+      403,
+    );
+    headers["x-forwarded-host"] = "lavish.example.test:8443";
+    headers["x-forwarded-proto"] = "https";
+    assert.equal((await rawRequest(server.port, `/api/${key}/prompts`, { method: "POST", headers, body })).status, 200);
+    assert.equal(
+      (
+        await rawRequest(server.port, `/api/${key}/prompts`, {
+          method: "POST",
+          headers: { ...headers, origin: "https://evil.example.test" },
+          body,
+        })
+      ).status,
+      403,
+    );
   } finally {
     await server.close();
     await rm(dir, { recursive: true, force: true });
@@ -6590,6 +6716,31 @@ test("extractArtifactHead pulls a data-URI favicon and title from the artifact h
   assert.match(faviconTag, /viewBox='0 0 100 100'/, "data-URI '>' chars must not truncate the tag");
   assert.match(faviconTag, /<\/svg>">$/, "the full link tag is captured");
   assert.equal(title, "Weekly Board");
+});
+
+test("extractArtifactHead ignores a <title> mentioned inside an HTML comment", () => {
+  const artifact = `<!doctype html><html><head>
+    <!-- Run title (appears in <title> and the header meta) -->
+    <title>Real Board</title>
+    </head><body></body></html>`;
+  assert.equal(extractArtifactHead(artifact).title, "Real Board");
+
+  const multiline = `<head><!--
+    <title>Draft</title>
+    -->
+    <title>Final</title></head>`;
+  assert.equal(extractArtifactHead(multiline).title, "Final");
+
+  assert.equal(extractArtifactHead("<head><!-- <title>Only in a comment</title> --></head>").title, "");
+});
+
+test("extractArtifactHead keeps the title when a '<!--' is not a comment", () => {
+  // Browsers read script and style contents as raw text, so a "<!--" there opens no comment.
+  assert.equal(
+    extractArtifactHead('<head><script>const marker = "<!--";</script><title>Board</title></head>').title,
+    "Board",
+  );
+  assert.equal(extractArtifactHead("<head><style>/* <!-- */</style><title>Board</title></head>").title, "Board");
 });
 
 test("extractArtifactHead handles shortcut icon and absolute hrefs", () => {
