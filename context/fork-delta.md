@@ -1,21 +1,25 @@
 # Fork delta
 
-This fork was reviewed against `upstream/main` at `0e2d3de` on 2026-10-26.
-The upstream sync retains four intentional policies and four compatibility
-fixes. Other historical fork commits no longer change the effective tree.
+This fork was reviewed against `upstream/main` at `0159b44` on 2026-11-27.
+The upstream sync retains four intentional policies and five compatibility or
+regression test adjustments. Other historical fork commits no longer change the
+effective tree.
 
-The reviewed delta from `4413dcc` through `0e2d3de` (v0.1.72–v0.1.93) includes
-the HTML-tree session and asset confinement security fix, server discovery and
-bind-durability rework with `--also-listen` inheritance, exclusive poll
-ownership with `--owner` and `--takeover` plus the `reply` command with server
-receipt, per-note delivery receipts, queued-annotation editing, whiteboard
-libraries, the explanation playbook, and guidance relocation to
-`docs/invariants.md` and `docs/delivery-acks.md`. Upstream release commits
-through v0.1.93 were reviewed but their version changes were not imported
+The reviewed delta from `0e2d3de` through `0159b44` (v0.1.94-v0.1.99 plus
+`#514`) includes loopback-only CLI server discovery by default with opt-in
+`LAVISH_AXI_DISCOVER_ALL_INTERFACES=1` (`#515`, `#517`), public session URL
+origin support via `LAVISH_AXI_PUBLIC_URL` (`#514`), daemon `process_id` proxy
+alias detection (`#503`), running the detached server with `cwd` set to the
+state directory (`#497`), preflight executable checks before Tailscale probes
+(`#467`), parser-reported `</body>` SDK injection (`#472`), ignoring HTML
+comments when reading artifact titles (`#501`), collapsible desktop conversation
+sidebar (`#462`), per-tab unsent-draft warnings (`#464`), and SDK annotation
+selector and reveal-scroll fixes (`#491`, `#493`). Upstream release commits
+through v0.1.99 were reviewed, but their version changes were not imported
 because this fork keeps its own release line.
 
-Rollback point for this sync is the pre-sync fork head `3a5ca60`.
-Prior reviewed upstream commit was `4413dcc` (v0.1.71).
+Rollback point for this sync is the pre-sync fork head `4f5b909`.
+Prior reviewed upstream commit was `0e2d3de` (v0.1.93 + 1).
 
 ## Retained policies
 
@@ -67,8 +71,9 @@ behavior. `src/cli.js` server help, `README.md` Network binding, `src/paths.js`
 comment, and `docs/invariants.md` process-model sentence carry the matching
 runtime, user, and architecture guidance. Upstream `AGENTS.md` no longer states
 the default directly; it points at those owners. `test/server-discovery.test.js`
-needs the opt-in env in the two Tailscale tests because upstream assumes
-automatic detection.
+needs the opt-in env in the two Tailscale tests, and `test/server.test.js` sets
+`LAVISH_AXI_TAILSCALE=1` on the Tailscale branch of the `LAVISH_AXI_PUBLIC_URL`
+override test because upstream assumes automatic detection.
 
 ### Keep release metadata on the fork's release line
 
@@ -133,6 +138,13 @@ with `git archive` from this fork's pre-sync commit
 `54b55875b1d5cda18a9fe11889ab604e97f73798`, which still shipped the SSE
 transport, so the seven-tab regression stays self-contained in fork-only clones
 where upstream's intermediate commits are absent.
+
+### Bound `--version` fast-path latency regression test
+
+`test/cli-version.test.js` checks that `--version`, `-v`, and `-V` finish
+within `VERSION_BUDGET_MS` (500 ms, or 750 ms on Windows) so a regression back
+to the telemetry-drain path fails directly in tests. This affects test
+assertions only and does not alter runtime behavior.
 
 ## Superseded commits
 

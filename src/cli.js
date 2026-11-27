@@ -33,7 +33,7 @@ import {
   publishToHtmlApp,
   updateHtmlApp,
 } from "./html-app.js";
-import { localInterfaceAddresses } from "./local-address.js";
+import { discoveryHosts, localInterfaceAddresses } from "./local-address.js";
 import {
   clientHost,
   defaultPort,
@@ -41,8 +41,10 @@ import {
   hostForUrl,
   isWildcardHost,
   LOOPBACK_HOST,
+  publicOrigin,
   resolveConcreteListenHosts,
   serverLogFile,
+  stateDir,
   stateFile,
   stateId,
 } from "./paths.js";
@@ -1766,17 +1768,12 @@ const MAX_HEALTH_BODY_BYTES = 256 * 1024;
 // answering, which can take longer than a plain health read.
 const HEALTH_RECONCILE_TIMEOUT_MS = 3000;
 
-// Every address a Lavish server on this port could be answering at, in preference order: the host
-// this CLI is configured for, loopback, then every other local interface address. Agents on one
-// machine do not share LAVISH_AXI_HOST, and a CLI that only dialed its own host (plus loopback)
-// concluded nothing was running while a server pinned to the tailnet address held the port, then
-// spawned a second daemon beside it on the same port and the same state file.
+// The addresses a Lavish server on this port could be answering at: the host this CLI is
+// configured for and loopback. Agents on one machine do not share LAVISH_AXI_HOST, so loopback is
+// the meeting point - every server binds it first as the port lock. See `discoveryHosts` for the
+// opt-in sweep that also finds a pre-0.1.78 server pinned to another address alone.
 function serverCandidateHosts() {
-  const hosts = [clientHost(), LOOPBACK_HOST];
-  for (const address of localInterfaceAddresses()) {
-    if (!hosts.includes(address)) hosts.push(address);
-  }
-  return hosts;
+  return discoveryHosts([clientHost(), LOOPBACK_HOST]);
 }
 
 function serverBaseUrl(host, port) {
@@ -1841,14 +1838,22 @@ async function findRunningServer(port, { reconcileNetwork = false } = {}) {
 }
 
 // Other Lavish daemons of this installation on the same port. An address the chosen server itself
-// reports as bound is the chosen server, not a duplicate. A server too old to report its addresses
-// is about to be replaced by version, so every other address is retired with it: an old daemon left
-// holding loopback would otherwise make the upgraded server refuse to start.
+// reports as bound, or a matching process identity through a proxy, is not a duplicate. A server
+// too old to report its addresses is about to be replaced by version, so every other address is
+// retired with it: an old daemon left holding loopback would otherwise make the upgraded server
+// refuse to start.
 function ownedDuplicates(owned, chosen) {
   const covered = new Set([chosen.host, ...(Array.isArray(chosen.health.hosts) ? chosen.health.hosts : [])]);
+  const chosenId = chosen.health.process_id;
   const duplicates = [];
   for (const entry of owned) {
-    if (entry === chosen || covered.has(entry.host)) continue;
+    const processId = entry.health.process_id;
+    if (
+      entry === chosen ||
+      covered.has(entry.host) ||
+      (typeof processId === "string" && processId !== "" && processId === chosenId)
+    )
+      continue;
     duplicates.push(entry);
     for (const host of Array.isArray(entry.health.hosts) ? entry.health.hosts : [entry.host]) covered.add(host);
   }
@@ -1936,6 +1941,7 @@ async function probeHealth(baseUrl, { reconcileNetwork, timeoutMs }) {
 // `reloadKey` names the session this invocation is about to open. A version-driven replacement
 // reloads that chrome only; every other open review page is told it is outdated and left alone.
 async function ensureServer({ forceRestart = false, reloadKey = "" } = {}) {
+  publicOrigin(process.env);
   const port = defaultPort();
   const requiredHosts = await requiredServerHosts();
   const { baseUrl, health: existing, duplicates, foreign } = await findRunningServer(port, { reconcileNetwork: true });
@@ -2274,10 +2280,16 @@ export function createServerSpawnOptions(logFd = null) {
   const stdio = /** @type {import("node:child_process").StdioOptions} */ (
     logFd === null ? "ignore" : ["ignore", logFd, logFd]
   );
+  // The server is shared machine-wide, so it must not pin the first caller's folder: tools that
+  // reap processes by working directory when deleting a worktree would stop every open session.
+  // The state dir is passed absolute so a relative LAVISH_AXI_STATE_DIR is not re-resolved
+  // against that new cwd.
+  const dir = path.resolve(stateDir());
   return {
     detached: true,
     stdio,
-    env: { ...process.env, LAVISH_AXI_NO_OPEN: "1" },
+    cwd: dir,
+    env: { ...process.env, LAVISH_AXI_STATE_DIR: dir, LAVISH_AXI_NO_OPEN: "1" },
   };
 }
 
@@ -2642,7 +2654,7 @@ function createCommandHelp({ agent = "generic" } = {}) {
     libraries: `Usage: lavish-axi libraries [--search <text>] [--library <id>]\n\nList the Excalidraw libraries (.excalidrawlib files) the user copied into ~/.lavish-axi/excalidraw-libraries, or LAVISH_AXI_STATE_DIR/excalidraw-libraries when set. Their items appear in every whiteboard's library panel. --search lists item refs whose ref contains every search word; --library lists one library's item refs. Lavish only reads this directory and never downloads libraries.\n\nExamples:\n  lavish-axi libraries\n  lavish-axi libraries --search lambda\n  lavish-axi libraries --library aws-architecture-icons\n`,
     design: `Usage: lavish-axi design\n\nShow a copy-pasteable CDN snippet for Tailwind CSS browser runtime v4 + DaisyUI v5 + themes, the whiteboard (Mermaid) opt-in snippet, a content-to-playbook router, an optional layout safety CSS snippet, plus technical reference for DaisyUI components. ${PLAYBOOK_ROUTER_HELP} Lavish artifacts stay portable HTML. This CDN snippet is the design fallback, not the default: inspect the subject project before falling back, and paste the layout safety CSS only when useful for dense nested grid/flex layouts, badges, wide fonts, or local media. ${DESIGN_PRIORITY_RULE}\n`,
     setup: `Usage: lavish-axi setup hooks\n       lavish-axi setup plugin\n\nhooks: install or repair agent SessionStart hooks for lavish-axi ambient context in Claude Code, Codex, OpenCode, and GitHub Copilot CLI. Restart your agent session afterward to receive the context. This is the primary integration - it carries live session state.\n\nplugin: register the installed lavish-axi package as an Agent Plugin (agent-plugins.org) in VS Code, Cursor, and GitHub Copilot CLI. The installed package directory is itself the plugin root, so nothing is downloaded and no marketplace is involved. Reload each client afterward. Codex users should use \`setup hooks\` instead.\n\nBoth actions are explicit opt-in, idempotent, and repair a stale path after a reinstall.\n`,
-    server: `Usage: lavish-axi server [--port 4387] [--verbose] [--also-listen <host>...]\n\nRun the local Lavish Editor server. Pass --verbose (or set LAVISH_AXI_DEBUG=1) to log session and watcher events to stderr. Detached server output is appended to ~/.lavish-axi/server.log, or LAVISH_AXI_STATE_DIR/server.log when set, for startup and crash diagnostics.\n\nLavish is loopback-only by default and binds to 127.0.0.1. Set LAVISH_AXI_TAILSCALE=1 to also bind this machine's Tailscale IPv4 and use its MagicDNS name in generated session links. Tailscale access exposes an unauthenticated server that can read and serve arbitrary local files to devices on the tailnet, so enable it only on a trusted tailnet. Any explicit LAVISH_AXI_HOST overrides Tailscale binding; wildcard values such as 0.0.0.0 or :: are restricted to loopback. An explicit non-wildcard LAVISH_AXI_HOST sets the bind address, and the server also listens on 127.0.0.1 so every local CLI finds it; --also-listen adds further concrete addresses (the CLI passes it when it replaces a server, to keep every address the old one served). An address that cannot be bound is retried in the background and reported as network_warning. LAVISH_AXI_LINK_HOST can set the link hostname when Tailscale access is disabled. See README's Allowed hosts section for Host allowlisting and LAVISH_AXI_ALLOWED_HOSTS. LAVISH_AXI_NO_OPEN=1 (or --no-open) suppresses the local browser launch.\n`,
+    server: `Usage: lavish-axi server [--port 4387] [--verbose] [--also-listen <host>...]\n\nRun the local Lavish Editor server. Pass --verbose (or set LAVISH_AXI_DEBUG=1) to log session and watcher events to stderr. Detached server output is appended to ~/.lavish-axi/server.log, or LAVISH_AXI_STATE_DIR/server.log when set, for startup and crash diagnostics.\n\nLavish is loopback-only by default and binds to 127.0.0.1. Set LAVISH_AXI_TAILSCALE=1 to also bind this machine's Tailscale IPv4 and use its MagicDNS name in generated session links. Tailscale access exposes an unauthenticated server that can read and serve arbitrary local files to devices on the tailnet, so enable it only on a trusted tailnet. Any explicit LAVISH_AXI_HOST overrides Tailscale binding; wildcard values such as 0.0.0.0 or :: are restricted to loopback. An explicit non-wildcard LAVISH_AXI_HOST sets the bind address, and the server also listens on 127.0.0.1 so every local CLI finds it; --also-listen adds further concrete addresses (the CLI passes it when it replaces a server, to keep every address the old one served). An address that cannot be bound is retried in the background and reported as network_warning. LAVISH_AXI_LINK_HOST can set the link hostname when Tailscale access is disabled. See README's Allowed hosts section for session-link origins and Host allowlisting. LAVISH_AXI_NO_OPEN=1 (or --no-open) suppresses the local browser launch.\n`,
   };
 }
 

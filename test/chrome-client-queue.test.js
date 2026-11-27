@@ -72,6 +72,9 @@ function identicalProjectionNote(offset) {
   };
 }
 
+const UNSENT_OWNERSHIP_COPY =
+  "Unsent answers stay in the tab or window where you entered them; taking over in another window does not bring them along.";
+
 async function createChromeHarness({
   fetchImpl = /** @type {(url?: any, init?: any) => Promise<any>} */ (
     async () => ({ ok: true, json: async () => ({}) })
@@ -79,6 +82,10 @@ async function createChromeHarness({
   sessionData = defaultSessionData,
   artifactSrc = "",
   storage = new Map(),
+  // The viewer-wide localStorage, kept apart from the per-tab sessionStorage above. `localStorageThrows`
+  // models a browser that refuses storage access outright (private mode, blocked site data).
+  localStore = new Map(),
+  localStorageThrows = false,
   beginLoadResponses = [],
   handoffResponses = [],
   storedQueue = null,
@@ -489,6 +496,20 @@ async function createChromeHarness({
         storage.delete(key);
       },
     },
+    localStorage: {
+      getItem(key) {
+        if (localStorageThrows) throw new Error("SecurityError: storage disabled");
+        return localStore.has(key) ? localStore.get(key) : null;
+      },
+      setItem(key, value) {
+        if (localStorageThrows) throw new Error("SecurityError: storage disabled");
+        localStore.set(key, String(value));
+      },
+      removeItem(key) {
+        if (localStorageThrows) throw new Error("SecurityError: storage disabled");
+        localStore.delete(key);
+      },
+    },
     window: {
       clearTimeout: fakeClearTimeout,
       setTimeout: fakeSetTimeout,
@@ -646,6 +667,7 @@ async function createChromeHarness({
     },
     focusLog,
     storage,
+    localStore,
     warningRows() {
       return element("warningsList").children.filter((child) => String(child.className).startsWith("warning-row"));
     },
@@ -4309,6 +4331,50 @@ test("a load that asks for the artifact again gets the whole recovery backoff ag
   assert.match(String(chrome.element("layoutGateTitle").innerHTML), /Checking layout/);
 });
 
+test("empty Send names this tab's queue without importing another window's answers", async () => {
+  const firstStorage = new Map();
+  const secondStorage = new Map();
+  const postedBodies = [];
+  const fetchImpl = async (url, init) => {
+    if (String(url).endsWith("/prompts")) postedBodies.push(JSON.parse(init.body));
+    return { ok: true, json: async () => ({}) };
+  };
+  const first = await createChromeHarness({ storage: firstStorage, fetchImpl });
+  first.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: { prompt: "Keep my answer", selector: "#answer", tag: "input", text: "Answer" },
+  });
+  const savedQueue = firstStorage.get("lavish-axi:queued:abc");
+  const second = await createChromeHarness({
+    storage: secondStorage,
+    fetchImpl,
+    artifactSrc: "/artifact/abc/index.html",
+    sessionData: { ...defaultSessionData, chromeLoadToken: "old-handoff" },
+    beginLoadResponses: [{ ok: false, status: 409, json: async () => ({ status: "superseded" }) }],
+  });
+
+  second.element("send").click();
+  await flushPromises();
+  assert.equal(second.element("sendHint").hidden, false);
+  assert.equal(second.element("sendHint").textContent, `Nothing queued in this tab. ${UNSENT_OWNERSHIP_COPY}`);
+  assert.equal(second.element("layoutGateCopy").textContent, UNSENT_OWNERSHIP_COPY);
+  assert.equal(second.queued().length, 0);
+  assert.equal(first.queued().length, 1);
+  assert.equal(firstStorage.get("lavish-axi:queued:abc"), savedQueue);
+  assert.equal(second.reloadCount(), 0, "empty Send never takes over");
+
+  second.element("handoffTakeover").click();
+  assert.equal(second.reloadCount(), 1);
+  // Model the explicit reload in B with B's storage, not A's. The warning is mitigation,
+  // not draft migration; only reloading A with its own storage recovers its queued answer.
+  const takenOver = await createChromeHarness({ storage: secondStorage, fetchImpl });
+  const originalReloaded = await createChromeHarness({ storage: firstStorage, fetchImpl });
+  assert.equal(takenOver.queued().length, 0);
+  assert.equal(originalReloaded.queued()[0].prompt, "Keep my answer");
+  assert.equal(firstStorage.get("lavish-axi:queued:abc"), savedQueue);
+  assert.equal(postedBodies.length, 0, "neither empty Send nor takeover submits another window's answers");
+});
+
 test("a superseded reviewer is not retried in the background", async () => {
   const chrome = await createChromeHarness({
     artifactSrc: "/artifact/abc/index.html",
@@ -4340,7 +4406,9 @@ test("a superseded first load names itself on the layout gate instead of holding
   assert.equal(chrome.element("artifact").src, "");
   assert.equal(chrome.element("layoutGateOverlay").hidden, false);
   assert.match(chrome.element("layoutGateTitle").textContent, /already open in another tab/);
+  assert.equal(chrome.element("layoutGateCopy").textContent, UNSENT_OWNERSHIP_COPY);
   assert.equal(chrome.element("layoutGateAction").textContent, "Take over here");
+  assert.equal(chrome.reloadCount(), 0, "the warning appears before any takeover");
   chrome.element("layoutGateAction").click();
   assert.equal(chrome.reloadCount(), 1);
   // Taking over is the user's action; nothing may retry in the background against the tab that
@@ -5920,10 +5988,14 @@ test("chrome send with an empty composer shows a visible hint", async () => {
   chrome.element("send").click();
 
   assert.equal(chrome.element("sendHint").hidden, false);
-  assert.equal(chrome.element("sendHint").textContent, "Write a message or annotate an element first.");
+  assert.equal(chrome.element("sendHint").textContent, `Nothing queued in this tab. ${UNSENT_OWNERSHIP_COPY}`);
   assert.doesNotMatch(chrome.element("sendHint").textContent, /End session/);
   assert.equal(chrome.element("chatInput").focused, true);
   assert.equal(chrome.postedToFrame.length, 0);
+  chrome.runTimers(2600);
+  assert.equal(chrome.element("sendHint").hidden, false, "the ownership message outlasts the short hint hold");
+  chrome.runTimers(9000);
+  assert.equal(chrome.element("sendHint").hidden, true);
 });
 
 test("chrome send and end during an in-flight submit still ends after the submit drains the queue", async () => {
@@ -8761,6 +8833,18 @@ test("the artifact learns which elements carry a queued note, never the note its
   assert.deepEqual(JSON.parse(JSON.stringify(anchors)), { type: "lavish:queuedAnchors", selectors: ["main > h2"] });
 });
 
+// The artifact walks the list newest first, so a selector a newer note carries again must sit at
+// that newer note, after a selector queued in between; otherwise the in-between note would win.
+test("the artifact's queued-anchor list places each selector at its newest note", async () => {
+  const chrome = await createChromeHarness();
+  queueHeadingNote(chrome, "Make this heading bigger", "main > h2");
+  queueHeadingNote(chrome, "Make this heading blue", "main > h2:nth-of-type(2)");
+  queueHeadingNote(chrome, "Make this heading bold", "main > h2");
+
+  const anchors = chrome.postedToFrame.filter((message) => message.type === "lavish:queuedAnchors").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(anchors.selectors)), ["main > h2:nth-of-type(2)", "main > h2"]);
+});
+
 test("clicking an annotated element in the artifact opens its queued note", async () => {
   const chrome = await createChromeHarness();
   queueHeadingNote(chrome, "First thought");
@@ -9113,6 +9197,197 @@ test("whiteboard init flags libraries that changed between the libraries and sou
   });
   assert.equal(failed.librariesUnavailable, true);
   assert.equal(JSON.stringify(failed.libraries), "[]");
+});
+
+// A selector past the 240/300-char caps that table-cell.js and layout-warnings.js put on
+// their own target fields still anchors in full: the queued-anchor list and the reopen lookup
+// use `prompt.selector`, which the chrome never shortens.
+test("a queued note with a very long selector is announced and reopened by its full selector", async () => {
+  const chrome = await createChromeHarness();
+  const selector = "html > body > " + Array.from({ length: 120 }, () => "div").join(" > ") + " > td";
+  assert.ok(selector.length > 512);
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: {
+      prompt: "Fix this cell",
+      selector,
+      tag: "td",
+      text: "42",
+      target: { type: "table-cell", selector: selector.slice(0, 240), rowLabel: "", columnLabel: "", text: "42" },
+    },
+  });
+
+  const anchors = chrome.postedToFrame.filter((message) => message.type === "lavish:queuedAnchors").at(-1);
+  assert.deepEqual(JSON.parse(JSON.stringify(anchors)).selectors, [selector]);
+
+  chrome.sendFrameMessage({ type: "lavish:editQueuedAnchor", selector });
+  assert.match(chrome.element("queuedLog").innerHTML, /class="queued-edit-input"[^>]*>Fix this cell</);
+});
+
+// ---- Desktop conversation panel collapse ----
+
+function sidebarState(chrome) {
+  const toggle = chrome.element("sidebarToggle");
+  const count = chrome.element("sidebarToggleCount");
+  return {
+    collapsed: chrome.element("body").classList.contains("panel-collapsed"),
+    expanded: toggle["aria-expanded"],
+    label: toggle["aria-label"],
+    title: toggle.title,
+    unread: toggle.classList.contains("is-unread"),
+    count: count.hidden ? null : count.textContent,
+    stored: chrome.localStore.get("lavish-axi:panel-collapsed") || null,
+  };
+}
+
+test("desktop sidebar toggle hides and restores the conversation panel", async () => {
+  const chrome = await createChromeHarness();
+
+  const open = sidebarState(chrome);
+  assert.equal(open.collapsed, false);
+  assert.equal(open.expanded, "true");
+  assert.equal(open.label, "Hide conversation");
+  assert.equal(open.title, "Hide conversation");
+  assert.equal(open.count, null);
+
+  chrome.element("sidebarToggle").dispatch("click", {});
+  const collapsed = sidebarState(chrome);
+  assert.equal(collapsed.collapsed, true);
+  assert.equal(collapsed.expanded, "false");
+  assert.equal(collapsed.label, "Show conversation");
+  // The preference is the viewer's, not the review's: one key shared by every session.
+  assert.equal(collapsed.stored, "1");
+  assert.equal(chrome.storage.has("lavish-axi:panel-collapsed"), false, "never per-tab sessionStorage");
+
+  chrome.element("sidebarToggle").dispatch("click", {});
+  const reopened = sidebarState(chrome);
+  assert.equal(reopened.collapsed, false);
+  assert.equal(reopened.expanded, "true");
+  assert.equal(reopened.stored, null);
+});
+
+test("a collapsed panel stays collapsed across a chrome reload and across sessions", async () => {
+  const localStore = new Map([["lavish-axi:panel-collapsed", "1"]]);
+  const chrome = await createChromeHarness({
+    localStore,
+    sessionData: { ...defaultSessionData, key: "another-review" },
+  });
+
+  const state = sidebarState(chrome);
+  assert.equal(state.collapsed, true);
+  assert.equal(state.expanded, "false");
+  assert.equal(state.label, "Show conversation");
+});
+
+test("the sidebar toggle still works when the browser refuses localStorage", async () => {
+  const chrome = await createChromeHarness({ localStorageThrows: true });
+
+  assert.equal(sidebarState(chrome).collapsed, false);
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).collapsed, true);
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).collapsed, false);
+});
+
+test("collapsing the panel moves focus out of it to the toggle", async () => {
+  const chrome = await createChromeHarness();
+  const input = chrome.element("chatInput");
+  input.parentElement = chrome.element("panel");
+  input.focus();
+
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(chrome.focusLog.at(-1), "sidebarToggle");
+});
+
+test("a collapsed toggle reports queued notes and unseen agent replies", async () => {
+  const chrome = await createChromeHarness();
+  chrome.element("sidebarToggle").dispatch("click", {});
+
+  // A reply that lands while the panel is hidden marks the toggle until the panel opens.
+  chrome.eventSource().listeners.get("agent-reply")({ data: JSON.stringify({ text: "Renamed the payment step." }) });
+  let state = sidebarState(chrome);
+  assert.equal(state.unread, true);
+  assert.equal(state.label, "Show conversation (new reply)");
+
+  // Queued work outranks the unread marker: it is what the user still has to send.
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: { prompt: "Call this Payment method", selector: "h2", tag: "element", text: "Payment" },
+  });
+  state = sidebarState(chrome);
+  assert.equal(state.count, "1");
+  assert.equal(state.unread, false);
+  assert.equal(state.label, "Show conversation (1 queued)");
+
+  chrome.sendFrameMessage({
+    type: "lavish:queuePrompt",
+    prompt: { prompt: "Drop the map preview", selector: "p", tag: "element", text: "Autofill" },
+  });
+  assert.equal(sidebarState(chrome).count, "2");
+
+  // Opening the panel shows both, so neither marker is owed any more.
+  chrome.element("sidebarToggle").dispatch("click", {});
+  state = sidebarState(chrome);
+  assert.equal(state.count, null);
+  assert.equal(state.unread, false);
+  assert.equal(state.label, "Hide conversation");
+
+  // And collapsing again does not resurrect the reply that was already seen.
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).unread, false);
+});
+
+test("clicking an annotated element while the panel is collapsed reopens it to edit the note", async () => {
+  const chrome = await createChromeHarness();
+  queueHeadingNote(chrome, "Shorter heading");
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).collapsed, true);
+
+  chrome.sendFrameMessage({ type: "lavish:editQueuedAnchor", selector: "main > h2" });
+
+  const state = sidebarState(chrome);
+  assert.equal(state.collapsed, false);
+  assert.equal(state.expanded, "true");
+  assert.equal(state.stored, null);
+  assert.match(chrome.element("queuedLog").innerHTML, /class="queued-edit-input"[^>]*>Shorter heading</);
+});
+
+test("clicking the element of a note already being edited reopens the collapsed panel to that edit", async () => {
+  const chrome = await createChromeHarness();
+  queueHeadingNote(chrome, "Shorter heading");
+  chrome.element("queuedLog").dispatch("click", { target: queuedLogNode(["bubble", "queued"], 0) });
+  typeIntoQueuedEdit(chrome, "Much shorter heading");
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).collapsed, true);
+
+  chrome.sendFrameMessage({ type: "lavish:editQueuedAnchor", selector: "main > h2" });
+
+  assert.equal(sidebarState(chrome).collapsed, false);
+  assert.equal(chrome.focusLog.at(-1), "queued-edit-input");
+  assert.match(chrome.element("queuedLog").innerHTML, /class="queued-edit-input"[^>]*>Much shorter heading</);
+});
+
+test("an expanded desktop panel never marks a reply as unread", async () => {
+  const chrome = await createChromeHarness();
+  chrome.eventSource().listeners.get("agent-reply")({ data: JSON.stringify({ text: "Done." }) });
+  chrome.element("sidebarToggle").dispatch("click", {});
+  assert.equal(sidebarState(chrome).unread, false);
+});
+
+test("the stored desktop collapse never hides the phone sheet", async () => {
+  const localStore = new Map([["lavish-axi:panel-collapsed", "1"]]);
+  const chrome = await createChromeHarness({ mobile: true, localStore });
+
+  assert.equal(sidebarState(chrome).collapsed, false, "phone width keeps its own dock");
+  assert.equal(chrome.element("body").classList.contains("sheet-open"), false);
+
+  // Widening the window past the breakpoint restores the viewer's desktop preference...
+  chrome.setMobile(false);
+  assert.equal(sidebarState(chrome).collapsed, true);
+  // ...and narrowing it again hands the conversation back to the sheet.
+  chrome.setMobile(true);
+  assert.equal(sidebarState(chrome).collapsed, false);
+  assert.equal(sidebarState(chrome).stored, "1", "crossing the breakpoint does not rewrite the preference");
 });
 
 // ---- Tab title and icon from the artifact (lavish:documentMeta) ----

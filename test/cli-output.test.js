@@ -992,6 +992,34 @@ test("export output separates unresolved assets from notices", () => {
   assert.equal(output.warnings.length, 3);
 });
 
+test("open reports an invalid LAVISH_AXI_PUBLIC_URL before starting the server", async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), "lavish-public-url-"));
+  const artifact = path.join(dir, "artifact.html");
+  await writeFile(artifact, "<!doctype html><html><body>review</body></html>");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../bin/lavish-axi.js", import.meta.url)), artifact, "--no-open"],
+      {
+        env: {
+          ...process.env,
+          LAVISH_AXI_STATE_DIR: dir,
+          LAVISH_AXI_TELEMETRY: "0",
+          LAVISH_AXI_PORT: "0",
+          LAVISH_AXI_PUBLIC_URL: "https://lavish.example.test/sub",
+        },
+        encoding: "utf8",
+        timeout: 10_000,
+      },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stdout, /LAVISH_AXI_PUBLIC_URL must be an http\(s\) origin/);
+    assert.equal(existsSync(path.join(dir, "server.log")), false);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("export command writes a portable HTML file next to the artifact", async () => {
   const dir = await mkdtemp(`${os.tmpdir()}/lavish-axi-export-test-`);
   const artifact = `${dir}/report.html`;
@@ -2923,6 +2951,25 @@ test("server spawn options can persist detached server output to a log fd", () =
   assert.deepEqual(options.stdio, ["ignore", 17, 17]);
 });
 
+test("server spawn options run the shared server from the state dir, not the caller's folder", () => {
+  const previousStateDir = process.env.LAVISH_AXI_STATE_DIR;
+  try {
+    const absolute = path.join(os.tmpdir(), "lavish-axi-cwd-test-state");
+    process.env.LAVISH_AXI_STATE_DIR = absolute;
+    const options = createServerSpawnOptions();
+    assert.equal(options.cwd, absolute);
+    assert.equal(options.env?.LAVISH_AXI_STATE_DIR, absolute);
+
+    process.env.LAVISH_AXI_STATE_DIR = "relative-state";
+    const relative = createServerSpawnOptions();
+    assert.equal(relative.cwd, path.resolve("relative-state"));
+    assert.equal(relative.env?.LAVISH_AXI_STATE_DIR, path.resolve("relative-state"));
+  } finally {
+    if (previousStateDir === undefined) delete process.env.LAVISH_AXI_STATE_DIR;
+    else process.env.LAVISH_AXI_STATE_DIR = previousStateDir;
+  }
+});
+
 test("detached server entry dispatches the CLI", () => {
   const entry = fileURLToPath(new URL("../bin/lavish-axi-server.js", import.meta.url));
   const result = spawnSync(process.execPath, [entry, "--version"], { encoding: "utf8" });
@@ -3362,7 +3409,9 @@ test("opening an artifact names that session as the one to reload across a versi
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
     recorder.close();
-    await rm(dir, { recursive: true, force: true });
+    // The spawned server runs with the state dir as its cwd, and Windows refuses to remove a
+    // directory that a still-exiting process is in.
+    await rm(dir, { recursive: true, force: true, maxRetries: 10 });
   }
 });
 
